@@ -7,6 +7,13 @@ import React, { useState, useEffect } from 'react';
 import { ViewState, Subject, Question, Coupon, AppSettings } from './types';
 import { StorageService } from './utils/storage';
 import { checkAnswer } from './utils/quiz';
+import { 
+  initializeCloudDataIfEmpty, 
+  subscribeToSubjects, 
+  subscribeToQuestions, 
+  subscribeToSettings, 
+  issueGlobalCoupon 
+} from './utils/firebase';
 import { MascotDuo, CartoonZebra, CartoonAvocado } from './components/Mascots';
 import { ResultModal } from './components/ResultModal';
 import { AdminLoginModal } from './components/AdminLoginModal';
@@ -75,12 +82,39 @@ export default function App() {
   };
 
   useEffect(() => {
-    // Listen to storage events for cross-tab multi-window synchronization
+    // Initialize cloud data if database is fresh
+    initializeCloudDataIfEmpty();
+
+    // 1. Subscribe to real-time subjects across all devices
+    const unsubSubjects = subscribeToSubjects((cloudSubjects) => {
+      setSubjects(cloudSubjects);
+      StorageService.saveSubjects(cloudSubjects);
+    });
+
+    // 2. Subscribe to real-time questions across all devices
+    const unsubQuestions = subscribeToQuestions((cloudQuestions) => {
+      setQuestions(cloudQuestions);
+      StorageService.saveQuestions(cloudQuestions);
+    });
+
+    // 3. Subscribe to real-time settings across all devices
+    const unsubSettings = subscribeToSettings((cloudSettings) => {
+      setSettings(cloudSettings);
+      StorageService.saveSettings(cloudSettings);
+    });
+
+    // 4. Listen to storage events for cross-tab multi-window synchronization
     const handleStorageChange = () => {
       refreshStorageData();
     };
     window.addEventListener('storage', handleStorageChange);
-    return () => window.removeEventListener('storage', handleStorageChange);
+
+    return () => {
+      unsubSubjects();
+      unsubQuestions();
+      unsubSettings();
+      window.removeEventListener('storage', handleStorageChange);
+    };
   }, []);
 
   // Icon mapping helper
@@ -99,8 +133,8 @@ export default function App() {
     }
   };
 
-  // Handle Answer Submission
-  const handleAnswerSubmit = (e: React.FormEvent) => {
+  // Handle Answer Submission with Atomic Global Voucher Counter
+  const handleAnswerSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (viewState.type !== 'quiz') return;
 
@@ -113,21 +147,34 @@ export default function App() {
     setIsEvaluating(true);
     const isCorrect = checkAnswer(currentAnswer, currentQ.correctAnswers);
 
-    // Mark as answered in persistent storage (prevents any retrying)
+    // Mark as answered in persistent storage on this device (prevents any retrying)
     StorageService.markQuestionAnswered(currentQ.id, isCorrect, currentAnswer);
     setAnsweredMap(StorageService.getAnsweredMap());
 
     if (isCorrect) {
-      // Issue coupon with atomic global serial number
-      const newCoupon = StorageService.issueCoupon(currentQ, currentSub.name);
-      setEarnedCoupons(StorageService.getEarnedCoupons());
-      setResultModalData({
-        isOpen: true,
-        isCorrect: true,
-        question: currentQ,
-        coupon: newCoupon,
-        userAnswer: currentAnswer,
-      });
+      try {
+        // Issue coupon with atomic cross-device unique sequential number
+        const newCoupon = await issueGlobalCoupon(currentQ, currentSub.name, settings);
+        setEarnedCoupons(StorageService.getEarnedCoupons());
+        setResultModalData({
+          isOpen: true,
+          isCorrect: true,
+          question: currentQ,
+          coupon: newCoupon,
+          userAnswer: currentAnswer,
+        });
+      } catch (err) {
+        console.error('Failed to issue atomic global coupon:', err);
+        const fallbackCoupon = StorageService.issueCoupon(currentQ, currentSub.name);
+        setEarnedCoupons(StorageService.getEarnedCoupons());
+        setResultModalData({
+          isOpen: true,
+          isCorrect: true,
+          question: currentQ,
+          coupon: fallbackCoupon,
+          userAnswer: currentAnswer,
+        });
+      }
     } else {
       // Wrong answer
       setResultModalData({

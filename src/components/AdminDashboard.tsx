@@ -1,7 +1,17 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Subject, Question, AppSettings, Coupon, VoucherDesign, VoucherThemeColor, VoucherIconType } from '../types';
 import { StorageService } from '../utils/storage';
 import { parseAnswerList, formatSerialNumber } from '../utils/quiz';
+import { 
+  saveQuestionToCloud, 
+  deleteQuestionFromCloud, 
+  saveSubjectToCloud, 
+  deleteSubjectFromCloud, 
+  saveSettingsToCloud, 
+  resetCloudToDefault, 
+  getCloudCounter, 
+  setCloudCounter 
+} from '../utils/firebase';
 import { VoucherCard } from './VoucherCard';
 import {
   ArrowLeft,
@@ -22,6 +32,7 @@ import {
   Eye,
   EyeOff,
   MessageSquare,
+  Globe,
 } from 'lucide-react';
 
 interface AdminDashboardProps {
@@ -72,6 +83,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, onDataCh
     setTimeout(() => setActionNotice(null), 3000);
   };
 
+  // Fetch latest cloud counter when entering records tab or on mount
+  useEffect(() => {
+    getCloudCounter().then((cloudCount) => {
+      if (cloudCount >= 0) {
+        setGlobalCounter(cloudCount + 1);
+      }
+    });
+  }, [activeTab]);
+
   // 1. Save All Settings (Texts, Images, Quotes, Voucher Design)
   const handleSaveAllSettings = (e: React.FormEvent) => {
     e.preventDefault();
@@ -91,10 +111,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, onDataCh
     };
     setSettings(updatedSettings);
     StorageService.saveSettings(updatedSettings);
+    // Push to cloud Firestore for all devices
+    saveSettingsToCloud(updatedSettings).catch((err) =>
+      console.error('Failed to sync settings to cloud:', err)
+    );
     setSavedSuccess(true);
     onDataChanged();
     setTimeout(() => setSavedSuccess(false), 2000);
-    showNotice('設定已成功儲存！前台已同步套用。');
+    showNotice('設定已成功儲存！所有裝置即時同步套用。');
   };
 
   const updateVoucherDesign = (partial: Partial<VoucherDesign>) => {
@@ -120,8 +144,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, onDataCh
       );
       setSubjects(updated);
       StorageService.saveSubjects(updated);
+      const target = updated.find((s) => s.id === editingSubject.id);
+      if (target) {
+        saveSubjectToCloud(target).catch((err) =>
+          console.error('Failed to sync subject to cloud:', err)
+        );
+      }
       setEditingSubject(null);
-      showNotice(`已更新科目「${newSubjectName}」`);
+      showNotice(`已更新科目「${newSubjectName}」，已同步至所有裝置！`);
     } else {
       const newSub: Subject = {
         id: `sub_${Date.now()}`,
@@ -134,8 +164,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, onDataCh
       const updated = [...subjects, newSub];
       setSubjects(updated);
       StorageService.saveSubjects(updated);
+      saveSubjectToCloud(newSub).catch((err) =>
+        console.error('Failed to sync new subject to cloud:', err)
+      );
       setSelectedSubjectId(newSub.id);
-      showNotice(`已新增科目「${newSubjectName}」`);
+      showNotice(`已新增科目「${newSubjectName}」，已同步至所有裝置！`);
     }
     setNewSubjectName('');
     setNewSubjectDesc('');
@@ -147,7 +180,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, onDataCh
       alert('至少需保留一個科目！');
       return;
     }
-    if (!confirm('確定要刪除此科目嗎？該科目下的題目也會一併刪除。')) return;
+    if (!confirm('確定要刪除此科目嗎？該科目下的題目也會在所有裝置上一併刪除。')) return;
 
     const updatedSubs = subjects.filter((s) => s.id !== subId);
     const updatedQs = questions.filter((q) => q.subjectId !== subId);
@@ -157,10 +190,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, onDataCh
     StorageService.saveSubjects(updatedSubs);
     StorageService.saveQuestions(updatedQs);
 
+    deleteSubjectFromCloud(subId).catch((err) =>
+      console.error('Failed to delete subject from cloud:', err)
+    );
+
     if (selectedSubjectId === subId) {
       setSelectedSubjectId(updatedSubs[0]?.id || '');
     }
-    showNotice('科目已成功刪除');
+    showNotice('科目已刪除，並已同步至所有裝置');
     onDataChanged();
   };
 
@@ -200,8 +237,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, onDataCh
       );
       setQuestions(updated);
       StorageService.saveQuestions(updated);
+      const target = updated.find((q) => q.id === editingQuestion.id);
+      if (target) {
+        saveQuestionToCloud(target).catch((err) =>
+          console.error('Failed to update question on cloud:', err)
+        );
+      }
       setEditingQuestion(null);
-      showNotice(`已更新題目「${qTitle}」`);
+      showNotice(`已更新題目「${qTitle}」，已即時同步至所有裝置！`);
     } else {
       const newQ: Question = {
         id: `q_${Date.now()}`,
@@ -214,7 +257,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, onDataCh
       const updated = [...questions, newQ];
       setQuestions(updated);
       StorageService.saveQuestions(updated);
-      showNotice(`已新增題目「${qTitle}」`);
+      saveQuestionToCloud(newQ).catch((err) =>
+        console.error('Failed to save question to cloud:', err)
+      );
+      showNotice(`已新增題目「${qTitle}」，已即時同步至所有裝置！`);
     }
 
     setQTitle('');
@@ -225,11 +271,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, onDataCh
   };
 
   const handleDeleteQuestion = (qId: string) => {
-    if (!confirm('確定要刪除這道題目嗎？')) return;
+    if (!confirm('確定要刪除這道題目嗎？刪除後所有裝置將無法再看到。')) return;
     const updated = questions.filter((q) => q.id !== qId);
     setQuestions(updated);
     StorageService.saveQuestions(updated);
-    showNotice('題目已刪除');
+    deleteQuestionFromCloud(qId).catch((err) =>
+      console.error('Failed to delete question from cloud:', err)
+    );
+    showNotice('題目已刪除，並已即時同步至所有裝置');
     onDataChanged();
   };
 
@@ -246,7 +295,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, onDataCh
 
   // 4. Reset & Records
   const handleResetAnswered = () => {
-    if (confirm('確定要清除本機所有已作答紀錄嗎？清除後所有題目將恢復為可點擊挑戰狀態！')) {
+    if (confirm('確定要清除本機所有已作答紀錄嗎？清除後本機所有題目將恢復為可挑戰狀態！')) {
       StorageService.resetAnsweredQuestions();
       showNotice('✅ 本機答題紀錄已重置！所有題目皆可重新作答。');
       onDataChanged();
@@ -256,12 +305,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, onDataCh
   const handleUpdateGlobalCounter = (val: number) => {
     StorageService.setGlobalCounter(val);
     setGlobalCounter(val);
-    showNotice(`兌換券流水號已設為下一張發放：${formatSerialNumber(val)}`);
+    setCloudCounter(Math.max(0, val - 1)).catch((err) =>
+      console.error('Failed to update cloud counter:', err)
+    );
+    showNotice(`雲端與本機流水號已同步更新！下一張全域發放編號：${formatSerialNumber(val)}`);
   };
 
   const handleRestoreDefaults = () => {
-    if (confirm('確定要還原成預設題庫、樣式與科目設定嗎？自訂題目將被重設。')) {
+    if (confirm('確定要還原成預設題庫、樣式與科目設定嗎？所有裝置題庫將被重設回初始狀態。')) {
       StorageService.resetAllToDefault();
+      resetCloudToDefault().catch((err) =>
+        console.error('Failed to reset cloud defaults:', err)
+      );
       const freshSettings = StorageService.getSettings();
       setSettings(freshSettings);
       setZebraQuotesText((freshSettings.zebraQuotes || []).join('\n'));
@@ -270,7 +325,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, onDataCh
       setQuestions(StorageService.getQuestions());
       setGlobalCounter(StorageService.getGlobalCounter());
       setEarnedCoupons(StorageService.getEarnedCoupons());
-      showNotice('已成功恢復初始預設題庫！');
+      showNotice('已成功恢復初始題庫與預設設定，雲端同步中！');
       onDataChanged();
     }
   };
@@ -304,6 +359,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, onDataCh
           </button>
           <div className="h-4 w-[1px] bg-slate-700 mx-1"></div>
           <span className="text-sm font-bold text-amber-400">後台控制管理系統</span>
+          <span className="hidden sm:inline-flex items-center gap-1 text-[10px] font-bold text-emerald-400 bg-emerald-950/70 border border-emerald-500/40 px-2 py-0.5 rounded-full ml-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+            <span>雲端跨裝置即時同步</span>
+          </span>
         </div>
 
         <button

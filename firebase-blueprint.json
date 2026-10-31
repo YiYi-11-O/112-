@@ -1,0 +1,74 @@
+{
+  "entities": {
+    "Subject": {
+      "title": "Subject",
+      "description": "A quiz subject category",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "name": { "type": "string", "maxLength": 100 },
+        "icon": { "type": "string", "maxLength": 50 },
+        "color": { "type": "string", "maxLength": 100 },
+        "badgeBg": { "type": "string", "maxLength": 100 },
+        "description": { "type": "string", "maxLength": 500 }
+      },
+      "required": ["id", "name", "icon", "color"]
+    },
+    "Question": {
+      "title": "Question",
+      "description": "A quiz question belonging to a subject",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "subjectId": { "type": "string", "maxLength": 64 },
+        "title": { "type": "string", "maxLength": 200 },
+        "content": { "type": "string", "maxLength": 1000 },
+        "correctAnswers": { "type": "array" },
+        "explanation": { "type": "string", "maxLength": 2000 }
+      },
+      "required": ["id", "subjectId", "title", "content", "correctAnswers"]
+    },
+    "Counter": {
+      "title": "Counter",
+      "description": "Global sequential serial number counter for reward vouchers",
+      "type": "object",
+      "properties": {
+        "currentNumber": { "type": "number" }
+      },
+      "required": ["currentNumber"]
+    },
+    "AppSettings": {
+      "title": "AppSettings",
+      "description": "Synchronized global settings for titles, mascot quotes, and voucher design",
+      "type": "object",
+      "properties": {
+        "appTitle": { "type": "string", "maxLength": 200 },
+        "appSubtitle": { "type": "string", "maxLength": 500 },
+        "adminPassword": { "type": "string", "maxLength": 50 },
+        "badgeText": { "type": "string", "maxLength": 100 },
+        "startGameBtnText": { "type": "string", "maxLength": 100 },
+        "footerText": { "type": "string", "maxLength": 200 },
+        "customZebraImage": { "type": "string", "maxLength": 100000 },
+        "customAvocadoImage": { "type": "string", "maxLength": 100000 },
+        "zebraQuotes": { "type": "array" },
+        "avocadoQuotes": { "type": "array" },
+        "voucherDesign": { "type": "object" }
+      },
+      "required": ["appTitle", "voucherDesign"]
+    }
+  },
+  "firestore": {
+    "/subjects/{subjectId}": {
+      "schema": "Subject",
+      "description": "Quiz categories accessible across devices"
+    },
+    "/questions/{questionId}": {
+      "schema": "Question",
+      "description": "Quiz questions under subjects, synced across all devices"
+    },
+    "/system/{systemDocId}": {
+      "schema": "Counter",
+      "description": "System state including global serial counter and global settings"
+    }
+  }
+}

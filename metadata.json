@@ -1,0 +1,6 @@
+{
+  "name": "Zebra & Avocado Quiz Quest",
+  "description": "可愛活潑的手機闖關答題遊戲，卡通斑馬與酪梨陪伴挑戰題目，答對即可領取不重複流水號兌換券，附帶完整題庫與標題後台管理功能。",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
